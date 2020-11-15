@@ -110,4 +110,30 @@ class Transformer(nn.Module):
         output = self.decoder(x)
         return output
 
+class InteractionNetwork(nn.Module):
+    def __init__(self, protein_model, molecule_model, protein_size, molecule_size):
+        super(InteractionNetwork, self).__init__()
+        self.protein_model = protein_model
+        self.molecule_model = molecule_model
+        self.embedding_size = protein_size + molecule_size
+        
+        self.dense_1 = nn.Linear(self.embedding_size, 1024)
+        self.dropout_1 = nn.Dropout(0.1)
+        self.dense_2 = nn.Linear(1024, 1024)
+        self.dropout_2 = nn.Dropout(0.1)
+        self.dense_3 = nn.Linear(1024, 512)
+        
+        self.prediction = nn.Linear(512, 1)
+        
+    def forward(self, protein, molecule):
+        protein = self.protein_model(protein)
+        molecule = self.molecule_model(molecule)
+        embedding = torch.cat((protein, molecule), dim=1)
+        
+        output = self.dense_1(embedding).clamp(min=0) # Clamp <=> ReLU
+        output = self.dropout_1(output)
+        output = self.dense_2(output).clamp(min=0)
+        output = self.dropout_2(output)
+        output = self.dense_3(output).clamp(min=0)
+        output = self.prediction(output)    # Kernel_initializer = 'normal'
 
