@@ -38,6 +38,43 @@ class CNNModel(nn.Module):
         out = self.output(DTI)
         return out
 
+class LSTM(nn.Module):
+    def __init__(self, vocab_size, embedding_size, hidden_size, out_size,
+                 bidirect, dropout=.1, num_layers=1):
+        """
+        Even if we don't use it, it means we could potentially try 2 different models for 
+        protein encoding. Also, it has fewer parameters than the transformer - meaning it 
+        might work better for the smaller protein dataset.
+        
+        Model is LSTM followed by three linear/dropout layers
+        """
+        self.bidirect = bidirect
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        # self.embedder = nn.Embedding(vocab_size, embedding_size)
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers=num_layers, 
+                            batch_first=True, dropout=dropout, bidirection=bidirect)
+        size = [1024*np.pow(1/2, i) for i in range(num_linears)]
+        self.linear_1 = nn.Linear(2*hidden_size, 512)
+        self.linear_2 = nn.Linear(512, 256)
+        self.linear_3 = nn.Linear(256, out_size)
+        self.dropout_1 = nn.Dropout(dropout)
+        self.dropout_2 = nn.Dropout(dropout)
+    
+    def forward(self, words):
+        """
+        Unlike HW3 LSTM, this does not account for varying input sizes.
+        Are proteins all the same size? Will check later.
+        """
+        embedding = self.embedder(words)
+        out, hn = self.lstm(embedding)
+        
+        output = F.relu(self.linear_1(out.data))
+        output = F.relu(self.linear_2(self.dropout_1(out)))
+        output = F.relu(self.linear_3(self.dropout_2(out)))
+        
+        return output
+
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=.1, max_len=5000):
         """
@@ -64,7 +101,7 @@ class PositionalEncoding(nn.Module):
     
     def forward(self, x):
         x = x + self.encoding[:x.size(0), :]
-        return self.dropout(x)
+        return self.dropout(x)        
 
 class Transformer(nn.Module):
     def __init__(self, num_embeddings, input_size, n_head, hidden_size, n_layers, dropout=.1):
@@ -130,10 +167,15 @@ class InteractionNetwork(nn.Module):
         molecule = self.molecule_model(molecule)
         embedding = torch.cat((protein, molecule), dim=1)
         
-        output = self.dense_1(embedding).clamp(min=0) # Clamp <=> ReLU
+        output = F.relu(self.dense_1(embedding))
         output = self.dropout_1(output)
-        output = self.dense_2(output).clamp(min=0)
+        output = F.relu(self.dense_2(output))
         output = self.dropout_2(output)
-        output = self.dense_3(output).clamp(min=0)
+        output = F.relu(self.dense_3(output))
         output = self.prediction(output)    # Kernel_initializer = 'normal'
-
+        
+        
+        
+        
+        
+        
