@@ -1,104 +1,85 @@
 import logging
+import torch
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from collections import OrderedDict
+from collections import namedtuple
+from itertools import product
 import constants
 from utility import *
-from copy import deepcopy
 from models import *
-import torch
+from run_manager import RunManager
+from evaluator import *
 
 
-def prepare_interaction_pairs(XD, XT, Y, rows, cols):
-    drugs = []
-    targets = []
-    affinities = []
+def get_hyper_params_combinations(args):
+    params = OrderedDict(
+        num_filters=args.num_filters,
+        drug_kernel_size=args.drug_kernel_size,
+        target_kernel_size=args.target_kernel_size,
+        learning_rate=[args.learning_rate],
+        num_epoch=[args.num_epoch]
+    )
 
-    for pair_ind in range(len(rows)):
-        drug = XD[rows[pair_ind]]
-        drugs.append(drug)
-
-        target = XT[cols[pair_ind]]
-        targets.append(target)
-
-        affinities.append(Y[rows[pair_ind], cols[pair_ind]])
-
-    drug_data = np.stack(drugs)
-    target_data = np.stack(targets)
-
-    return drug_data, target_data, affinities
+    HyperParams = namedtuple('HyperParams', params.keys())
+    hyper_params_list = []
+    for v in product(*params.values()):
+        hyper_params_list.append(HyperParams(*v))
+    return hyper_params_list
 
 
-def prepare_dataset():
-    logging.info("Loading Data Set...")
+def train(model, loader, hyper_params):
+    m = RunManager()
+    optimizer = optim.Adam(model.parameters(), lr=hyper_params.learning_rate)
 
-    args.drug_charset = constants.DRUG_CHARSET
-    args.drug_charset_size = len(constants.DRUG_CHARSET)
-    args.target_charset = constants.TARGET_CHARSET
-    args.target_charset_size = len(constants.TARGET_CHARSET)
+    m.begin_run(hyper_params, model, loader)
+    for epoch in range(hyper_params.num_epoch):
+        m.begin_epoch(epoch+1)
+        for batch in loader:
+            drugs = batch[0].long()
+            targets = batch[1].long()
+            affinities = batch[2].float()
+            preds = model(drugs, targets)
+            loss = F.mse_loss(preds, affinities)
 
-    data_set = DataSet()
-    # Get vectorize form of all drugs, targets and affinities between all of the pairs
-    XD, XT, Y = data_set.parse_data(args)
-    XD = np.asarray(XD)
-    XT = np.asarray(XT)
-    Y = np.asarray(Y)
-    args.drug_count = XD.shape[0]
-    args.target_count = XT.shape[0]
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-    valid_drug_idxs, valid_target_idxs = np.where(np.isnan(Y) == False)
+            m.track_loss(loss)
+            # m.track_num_correct(preds, affinities)
 
-    train_folds, test_set = data_set.load_dataset(args)
-    train_sets = []
-    dev_sets = []
-    test_sets = []
-    for fold_idx in range(len(train_folds)):
-        dev_set = train_folds[fold_idx]
-        dev_sets.append(dev_set)
-        rest_train_folds = deepcopy(train_folds)
-        rest_train_folds.pop(fold_idx)
-        train_set = [item for sublist in rest_train_folds for item in sublist]
-        train_sets.append(train_set)
-        test_sets.append(test_set)
-        logging.info(f"CV set {fold_idx+1}"
-                     f"\nTrain set size: {len(train_set)}"
-                     f"\nDev set size: {len(dev_set)}"
-                     f"\nTest set size: {len(test_set)}\n\n")
+        m.end_epoch()
+    m.end_run()
 
-    cv_train_datasets = []
-    cv_dev_datasets = []
-    for fold_idx in range(len(dev_sets)):
-        if fold_idx == 0:
-            train_meta_idxs = train_sets[fold_idx]
-            train_drug_idxs = valid_drug_idxs[train_meta_idxs]
-            train_target_idxs = valid_target_idxs[train_meta_idxs]
-            train_drugs, train_targets, train_affinities = prepare_interaction_pairs(XD, XT, Y, train_drug_idxs, train_target_idxs)
-            cv_train_datasets.append((train_drugs, train_targets, train_affinities))
-
-            dev_meta_idxs = dev_sets[fold_idx]
-            dev_drug_idxs = valid_drug_idxs[dev_meta_idxs]
-            dev_target_idxs = valid_target_idxs[dev_meta_idxs]
-            dev_drugs, dev_targets, dev_affinities = prepare_interaction_pairs(XD, XT, Y, dev_drug_idxs, dev_target_idxs)
-            cv_dev_datasets.append((dev_drugs, dev_targets, dev_affinities))
-
-    return cv_train_datasets, cv_dev_datasets
+    m.save('results')
+    return model
 
 
-def run():
-    cv_train_datasets, cv_dev_datasets = prepare_dataset()
-    train_drugs, train_targets, train_affinities = cv_train_datasets[0]
-    dev_drugs, dev_targets, dev_affinities = cv_dev_datasets[0]
+def run(args):
+    ''' cv_train_datasets, cv_dev_datasets each contains 5 DTIDatasets for train and development/validation respectively
+    test_dataset is a single DTIDataset.
+    Each DTIDataset can be used with dataloader to retrieve drug, target and affinity score as tensor in batch.'''
 
-    # One can use train_drugs[78836 x 100], train_targets[78836 x 1000], train_affinities for training
-    print("Drug original shape: ", train_drugs.shape)
-    print("Target original shape: ", train_targets.shape)
-
-    # CNNModel is just a baseline model, one can build better model based on the prepared data set
-    cnn_model = CNNModel(args)
-    outs = cnn_model(torch.from_numpy(train_drugs[:2]), torch.from_numpy(train_targets[:2]))
-    print("No training, 2 drug-target pair affinity prediction:\n", outs)
+    cv_train_datasets, cv_dev_datasets, test_dataset = process_dataset(args)
+    for hyper_params in get_hyper_params_combinations(args):
+        train_loader = DataLoader(cv_train_datasets[0], batch_size=args.batch_size, shuffle=True, num_workers=1)
+        model = CNNModel(args.drug_charset_size, args.drug_embedding_dim, hyper_params.drug_kernel_size,
+                         args.target_charset_size, args.target_embedding_dim, hyper_params.target_kernel_size,
+                         hyper_params.num_filters)
+        logging.info(f"Training with: {hyper_params}")
+        trained_model = train(model, train_loader, hyper_params)
+        logging.info("Training finished")
+        dev_loader = DataLoader(cv_dev_datasets[0], batch_size=args.batch_size, shuffle=True, num_workers=1)
+        dev_mse, dev_ci = get_MSE_CI(trained_model, dev_loader)
+        logging.info(f"Dev MSE: {dev_mse} and Dev CI: {dev_ci}")
+        print(f"\nDev MSE: {dev_mse}\nDev CI: {dev_ci}")
 
 
 if __name__ == "__main__":
-    args = constants.get_args()
+    arguments = constants.get_args()
     FORMAT = '%(asctime)-15s %(message)s'
-    logging.basicConfig(filename='app.log', filemode='w', format=FORMAT, level=getattr(logging, args.log.upper()))
-    logging.info(args)
-    run()
+    logging.basicConfig(filename='app.log', filemode='w', format=FORMAT, level=getattr(logging, arguments.log.upper()))
+    logging.info(arguments)
+    run(arguments)
+

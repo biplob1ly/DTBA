@@ -64,21 +64,24 @@ def get_args():
     parser.add_argument(
         '--drug_kernel_size',
         type=int,
-        default=4,
+        default=[4],
+        nargs='+',
         help='Kernel size for drug (SMILES sequence)'
     )
 
     parser.add_argument(
         '--target_kernel_size',
         type=int,
-        default=4,
+        default=[4],
+        nargs='+',
         help='Kernel size for target (FASTA sequence)'
     )
 
     parser.add_argument(
         '--num_filters',
         type=int,
-        default=32,
+        default=[32],
+        nargs='+',
         help='Number of filters/out_chanel for initial convolution layer'
     )
 
@@ -90,9 +93,16 @@ def get_args():
     )
 
     parser.add_argument(
+        '--batch_size',
+        type=int,
+        default=32,
+        help='Batch size. Must divide evenly into the dataset sizes.'
+    )
+
+    parser.add_argument(
         '--num_epoch',
         type=int,
-        default=1,
+        default=10,
         help='Number of epochs to train.'
     )
 
@@ -117,5 +127,5 @@ def get_args():
         help='use log transformation for Y'
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args()  # '--target_kernel_size 4 8'.split()
     return args
