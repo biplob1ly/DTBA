@@ -1,36 +1,35 @@
-2020-11-17 19:24:44,537 Namespace(batch_size=32, binary_th=0.0, data_config_id=1, dataset_path='./data/kiba/', drug_embedding_dim=128, drug_kernel_size=[4], is_log=0, learning_rate=0.001, log='INFO', max_drug_len=100, max_target_len=1000, num_epoch=10, num_filters=[32], random_seed=123, target_embedding_dim=128, target_kernel_size=[4])
-2020-11-17 19:24:44,537 Loading Data Set...
-2020-11-17 19:24:44,724 CV set 1
+2020-11-17 20:01:04,516 Namespace(batch_size=32, binary_th=0.0, data_config_id=1, dataset_path='./data/kiba/', drug_embedding_dim=128, drug_kernel_size=[4], is_log=0, learning_rate=0.001, log='INFO', max_drug_len=100, max_target_len=1000, num_epoch=10, num_filters=[32], random_seed=123, target_embedding_dim=128, target_kernel_size=[4])
+2020-11-17 20:01:04,517 Loading Data Set...
+2020-11-17 20:01:04,710 CV set 1
 Train set size: 78836
 Dev set size: 19709
 Test set size: 19709
 
 
-2020-11-17 19:24:44,803 CV set 2
+2020-11-17 20:01:04,796 CV set 2
 Train set size: 78836
 Dev set size: 19709
 Test set size: 19709
 
 
-2020-11-17 19:24:44,883 CV set 3
+2020-11-17 20:01:04,882 CV set 3
 Train set size: 78836
 Dev set size: 19709
 Test set size: 19709
 
 
-2020-11-17 19:24:44,963 CV set 4
+2020-11-17 20:01:04,968 CV set 4
 Train set size: 78836
 Dev set size: 19709
 Test set size: 19709
 
 
-2020-11-17 19:24:45,042 CV set 5
+2020-11-17 20:01:05,053 CV set 5
 Train set size: 78836
 Dev set size: 19709
 Test set size: 19709
 
 
-2020-11-17 19:24:46,661 Training with: HyperParams(num_filters=32, drug_kernel_size=4, target_kernel_size=4, learning_rate=0.001, num_epoch=10)
-2020-11-17 19:26:10,606 Training finished
-2020-11-17 19:26:19,392 Dev MSE: 0.6368168592453003
-Dev CI: 0.567596971988678
+2020-11-17 20:01:06,605 Training with: HyperParams(num_filters=32, drug_kernel_size=4, target_kernel_size=4, learning_rate=0.001, num_epoch=10)
+2020-11-17 20:02:47,846 Training finished
+2020-11-17 20:02:55,692 Dev MSE: 0.5968552827835083 and Dev CI: 0.6153157353401184
