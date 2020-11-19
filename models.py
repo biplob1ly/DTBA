@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
-
+import numpy as np
 
 class CNNModel(nn.Module):
     def __init__(self, drug_charset_size, drug_embedding_dim, drug_kernel_size,
@@ -52,32 +52,37 @@ class LSTM(nn.Module):
         
         Model is LSTM followed by three linear/dropout layers
         """
+        super(LSTM, self).__init__()
         self.bidirect = bidirect
-        self.input_size = input_size
         self.hidden_size = hidden_size
-        # self.embedder = nn.Embedding(vocab_size, embedding_size)
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers=num_layers, 
-                            batch_first=True, dropout=dropout, bidirection=bidirect)
-        size = [1024*np.pow(1/2, i) for i in range(num_linears)]
+        self.embedder = nn.Embedding(vocab_size, embedding_size)
+        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, 
+                            batch_first=True, dropout=dropout, bidirectional=bidirect)
         self.linear_1 = nn.Linear(2*hidden_size, 512)
-        self.linear_2 = nn.Linear(512, 256)
-        self.linear_3 = nn.Linear(256, out_size)
         self.dropout_1 = nn.Dropout(dropout)
+        self.linear_2 = nn.Linear(512, 256)
         self.dropout_2 = nn.Dropout(dropout)
+        self.linear_3 = nn.Linear(256, out_size)
     
-    def forward(self, words):
+    def forward(self, data):
         """
-        Unlike HW3 LSTM, this does not account for varying input sizes.
-        Are proteins all the same size? Will check later.
+        data is [num_examples x max_example_length]
+        returns vector of shape [num_examples x max_example_length x embedding_size]
         """
-        embedding = self.embedder(words)
-        out, hn = self.lstm(embedding)
+        # Hacky way to get the first zero in each example
+        mask = [torch.where(i == 0)[0] for i in data]
+        lengths = [x[0].item() if len(x) > 0 else data.shape[-1] for x in mask]
+        
+        embedding = self.embedder(data)
+        packed_embedding = nn.utils.rnn.pack_padded_sequence(embedding, lengths, enforce_sorted=False, batch_first=True)
+        out, hn = self.lstm(packed_embedding)
+        out, out_lengths = nn.utils.rnn.pad_packed_sequence(out)
         
         output = F.relu(self.linear_1(out.data))
-        output = F.relu(self.linear_2(self.dropout_1(out)))
-        output = F.relu(self.linear_3(self.dropout_2(out)))
+        output = F.relu(self.linear_2(self.dropout_1(output)))
+        output = F.relu(self.linear_3(self.dropout_2(output)))
         
-        return output
+        return output.permute(1,0,2)
 
 
 class PositionalEncoding(nn.Module):
@@ -116,16 +121,16 @@ class Transformer(nn.Module):
         https://pytorch.org/tutorials/beginner/transformer_tutorial.html
         
         num_embeddings: Size of input dictionary
-        input_size: Maximum size of inputs
+        input_size: embe
         n_head: number of heads in multihead attention
         hidden_size: size of embeddings/hidden layers
         n_layers: number of encoding layers in transformer
         """
         super(Transformer, self).__init__()
+        self.encoder = nn.Embedding(num_embeddings, input_size)
         self.pos_encoder = PositionalEncoding(input_size, dropout)
         encoder_layers = TransformerEncoderLayer(input_size, n_head, hidden_size, dropout)
         self.transformer_encoder = TransformerEncoder(encoder_layers, n_layers)
-        self.encoder = nn.Embedding(num_embeddings, input_size)
         self.input_size = input_size
         self.decoder = nn.Linear(input_size, num_embeddings)
         
@@ -155,11 +160,11 @@ class Transformer(nn.Module):
 
 
 class InteractionNetwork(nn.Module):
-    def __init__(self, protein_model, molecule_model, protein_size, molecule_size):
+    def __init__(self, drug_model, target_model, drug_size, target_size):
         super(InteractionNetwork, self).__init__()
-        self.protein_model = protein_model
-        self.molecule_model = molecule_model
-        self.embedding_size = protein_size + molecule_size
+        self.target_model = target_model
+        self.drug_model = drug_model
+        self.embedding_size = drug_size + target_size
         
         self.dense_1 = nn.Linear(self.embedding_size, 1024)
         self.dropout_1 = nn.Dropout(0.1)
@@ -169,10 +174,10 @@ class InteractionNetwork(nn.Module):
         
         self.prediction = nn.Linear(512, 1)
         
-    def forward(self, protein, molecule):
-        protein = self.protein_model(protein)
-        molecule = self.molecule_model(molecule)
-        embedding = torch.cat((protein, molecule), dim=1)
+    def forward(self, drug, target):
+        drug = self.drug_model(drug)
+        target = self.target_model(target)
+        embedding = torch.cat((drug, target), dim=1)
         
         output = F.relu(self.dense_1(embedding))
         output = self.dropout_1(output)

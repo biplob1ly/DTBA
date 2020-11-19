@@ -7,7 +7,7 @@ from collections import namedtuple
 from itertools import product
 import constants
 from utility import *
-from models import *
+from models import InteractionNetwork, LSTM, CNNModel, Transformer
 from run_manager import RunManager
 from evaluator import *
 
@@ -64,9 +64,18 @@ def run(args):
     cv_train_datasets, cv_dev_datasets, test_dataset = process_dataset(args)
     for hyper_params in get_hyper_params_combinations(args):
         train_loader = DataLoader(cv_train_datasets[0], batch_size=args.batch_size, shuffle=True, num_workers=1)
-        model = CNNModel(args.drug_charset_size, args.drug_embedding_dim, hyper_params.drug_kernel_size,
-                         args.target_charset_size, args.target_embedding_dim, hyper_params.target_kernel_size,
-                         hyper_params.num_filters)
+        
+        if args.model == 'CNN':
+            model = CNNModel(args.drug_charset_size, args.drug_embedding_dim, hyper_params.drug_kernel_size,
+                              args.target_charset_size, args.target_embedding_dim, hyper_params.target_kernel_size,
+                              hyper_params.num_filters)
+        elif args.model == 'LSTM':
+            drug_model = LSTM(args.drug_charset_size, args.drug_embedding_dim, args.hidden_size, args.drug_output_size, True, num_layers=3)
+            target_model = LSTM(args.target_charset_size, args.target_embedding_dim, args.hidden_size, args.target_output_size, True, num_layers=3)
+            model = InteractionNetwork(drug_model, target_model, args.drug_output_size, args.target_output_size)
+        else:
+            raise ValueError("Unknown value for args.model. Pick CNN or LSTM")
+            
         logging.info(f"Training with: {hyper_params}")
         trained_model = train(model, train_loader, hyper_params)
         logging.info("Training finished")

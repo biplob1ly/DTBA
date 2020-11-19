@@ -60,7 +60,35 @@ def get_args():
         default=128,
         help='Embedding dimension for a Target (FASTA) character'
     )
-
+    
+    parser.add_argument(
+        '--model_type',
+        type=str,
+        default='CNN',
+        help='CNN or LSTM models'
+    )
+    
+    parser.add_argument(
+        '--hidden_size',
+        type=int,
+        default=128,
+        help='Hidden size for LSTM models'
+    )
+    
+    parser.add_argument(
+        '--target_output_size',
+        type=int,
+        default=128,
+        help='Output size of LSTM network for target (FASTA) sequence'
+    )
+    
+    parser.add_argument(
+        '--drug_output_size',
+        type=int,
+        default=128,
+        help='Output size of LSTM network for drug (SMILES) sequence'
+    )
+    
     parser.add_argument(
         '--drug_kernel_size',
         type=int,
