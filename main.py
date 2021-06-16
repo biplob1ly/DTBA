@@ -1,22 +1,20 @@
 import logging
-import torch
-import torch.optim as optim
-from torch.utils.data import DataLoader
 from collections import OrderedDict
 from collections import namedtuple
 from itertools import product
 import constants
 from utility import *
-from models import InteractionNetwork, LSTM, CNNModel, Transformer
-from run_manager import RunManager
-from evaluator import *
+from models import CNNModel, Transformer, TransDTBA
+from trainer import train
+import random
+import os
 
 
 def get_hyper_params_combinations(args):
     params = OrderedDict(
         num_filters=args.num_filters,
         drug_kernel_size=args.drug_kernel_size,
-        target_kernel_size=args.target_kernel_size,
+        protein_kernel_size=args.protein_kernel_size,
         learning_rate=[args.learning_rate],
         num_epoch=[args.num_epoch]
     )
@@ -28,67 +26,52 @@ def get_hyper_params_combinations(args):
     return hyper_params_list
 
 
-def train(model, loader, hyper_params):
-    m = RunManager()
-    optimizer = optim.Adam(model.parameters(), lr=hyper_params.learning_rate)
-
-    m.begin_run(hyper_params, model, loader)
-    for epoch in range(hyper_params.num_epoch):
-        m.begin_epoch(epoch+1)
-        for batch in loader:
-            drugs = batch[0].long()
-            targets = batch[1].long()
-            affinities = batch[2].float()
-            preds = model(drugs, targets)
-            loss = F.mse_loss(preds, affinities)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            m.track_loss(loss)
-            # m.track_num_correct(preds, affinities)
-
-        m.end_epoch()
-    m.end_run()
-
-    m.save('results')
-    return model
-
-
-def run(args):
+def run(args, device):
     ''' cv_train_datasets, cv_dev_datasets each contains 5 DTIDatasets for train and development/validation respectively
     test_dataset is a single DTIDataset.
-    Each DTIDataset can be used with dataloader to retrieve drug, target and affinity score as tensor in batch.'''
+    Each DTIDataset can be used with dataloader to retrieve drug, protein and affinity score as tensor in batch.'''
 
     cv_train_datasets, cv_dev_datasets, test_dataset = process_dataset(args)
+
     for hyper_params in get_hyper_params_combinations(args):
-        train_loader = DataLoader(cv_train_datasets[0], batch_size=args.batch_size, shuffle=True, num_workers=1)
         
         if args.model == 'CNN':
             model = CNNModel(args.drug_charset_size, args.drug_embedding_dim, hyper_params.drug_kernel_size,
-                              args.target_charset_size, args.target_embedding_dim, hyper_params.target_kernel_size,
+                              args.protein_charset_size, args.protein_embedding_dim, hyper_params.protein_kernel_size,
                               hyper_params.num_filters)
-        elif args.model == 'LSTM':
-            drug_model = LSTM(args.drug_charset_size, args.drug_embedding_dim, args.hidden_size, args.drug_output_size, True, num_layers=3)
-            target_model = LSTM(args.target_charset_size, args.target_embedding_dim, args.hidden_size, args.target_output_size, True, num_layers=3)
-            model = InteractionNetwork(drug_model, target_model, args.drug_output_size, args.target_output_size)
+            model.to(device)
+        elif args.model == 'Transformer':
+             model = Transformer(args.drug_charset_size, args.drug_embedding_dim, args.max_drug_len,
+                               args.protein_charset_size, args.protein_embedding_dim, args.max_protein_len,
+                               args.num_trans_layers, args.num_attn_heads, args.trans_forward_expansion,
+                               args.trans_dropout_rate, args.batch_size)
+             model.to(device)
+        elif args.model == 'TransDTBA':
+             model = TransDTBA(args.drug_charset_size, args.drug_embedding_dim, args.max_drug_len,
+                               args.protein_charset_size, args.protein_embedding_dim, args.max_protein_len,
+                               args.num_trans_layers, args.num_attn_heads, args.trans_forward_expansion,
+                               args.trans_dropout_rate, args.batch_size)
+             model.to(device)
         else:
             raise ValueError("Unknown value for args.model. Pick CNN or LSTM")
-            
+
         logging.info(f"Training with: {hyper_params}")
-        trained_model = train(model, train_loader, hyper_params)
-        logging.info("Training finished")
-        dev_loader = DataLoader(cv_dev_datasets[0], batch_size=args.batch_size, shuffle=True, num_workers=1)
-        dev_mse, dev_ci = get_MSE_CI(trained_model, dev_loader)
-        logging.info(f"Dev MSE: {dev_mse} and Dev CI: {dev_ci}")
-        print(f"\nDev MSE: {dev_mse}\nDev CI: {dev_ci}")
+        train(model, cv_train_datasets, cv_dev_datasets, test_dataset, hyper_params, args.batch_size, device)
 
 
 if __name__ == "__main__":
     arguments = constants.get_args()
+    if not os.path.exists('./results'):
+        os.makedirs('./results')
     FORMAT = '%(asctime)-15s %(message)s'
-    logging.basicConfig(filename='app.log', filemode='w', format=FORMAT, level=getattr(logging, arguments.log.upper()))
+    logging.basicConfig(filename='./results/app.log', filemode='w', format=FORMAT, level=getattr(logging, arguments.log.upper()))
     logging.info(arguments)
-    run(arguments)
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+    random.seed(arguments.random_seed)
+    np.random.seed(arguments.random_seed)
+    torch.manual_seed(arguments.random_seed)
+    if use_cuda:
+        torch.cuda.manual_seed_all(arguments.random_seed)
+    run(arguments, device)
 

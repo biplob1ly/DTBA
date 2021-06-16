@@ -1,0 +1,26 @@
+[
+    {
+        "run": 1,
+        "epoch": 1,
+        "loss": 127.02379608154297,
+        "epoch_duration": 17.82524538040161,
+        "run duration": 17.825257062911987,
+        "num_filters": 32,
+        "drug_kernel_size": 4,
+        "protein_kernel_size": 4,
+        "learning_rate": 0.001,
+        "num_epoch": 2
+    },
+    {
+        "run": 1,
+        "epoch": 2,
+        "loss": 31.8680819272995,
+        "epoch_duration": 18.24094581604004,
+        "run duration": 36.06631112098694,
+        "num_filters": 32,
+        "drug_kernel_size": 4,
+        "protein_kernel_size": 4,
+        "learning_rate": 0.001,
+        "num_epoch": 2
+    }
+]

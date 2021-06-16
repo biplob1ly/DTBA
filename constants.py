@@ -1,9 +1,9 @@
 import argparse
 
-KNOWN_DRUG_KNOWN_TARGET = 1
-KNOWN_DRUG_UNKNOWN_TARGET = 2
-UNKNOWN_DRUG_KNOWN_TARGET = 3
-UNKNOWN_DRUG_UNKNOWN_TARGET = 4
+PADDING_INDEX = 0
+KNOWN_DRUG_KNOWN_PROTEIN = 1
+KNOWN_DRUG_UNKNOWN_PROTEIN = 2
+UNKNOWN_DRUG_KNOWN_PROTEIN = 3
 
 DRUG_CHARSET = {"#": 29, "%": 30, ")": 31, "(": 1, "+": 32, "-": 33, "/": 34, ".": 2,
                  "1": 35, "0": 3, "3": 36, "2": 4, "5": 37, "4": 5, "7": 38, "6": 6,
@@ -14,7 +14,7 @@ DRUG_CHARSET = {"#": 29, "%": 30, ")": 31, "(": 1, "+": 32, "-": 33, "/": 34, ".
                  "b": 21, "e": 57, "d": 22, "g": 58, "f": 23, "i": 59, "h": 24, "m": 60,
                  "l": 25, "o": 61, "n": 26, "s": 62, "r": 27, "u": 63, "t": 28, "y": 64}
 
-TARGET_CHARSET = {"A": 1, "C": 2, "B": 3, "E": 4, "D": 5, "G": 6,
+PROTEIN_CHARSET = {"A": 1, "C": 2, "B": 3, "E": 4, "D": 5, "G": 6,
                   "F": 7, "I": 8, "H": 9, "K": 10, "M": 11, "L": 12,
                   "O": 13, "N": 14, "Q": 15, "P": 16, "S": 17, "R": 18,
                   "U": 19, "T": 20, "W": 21, "V": 22, "Y": 23, "X": 24, "Z": 25}
@@ -29,7 +29,7 @@ def get_args():
     parser.add_argument(
         '--data_config_id',
         type=int,
-        default=KNOWN_DRUG_KNOWN_TARGET,
+        default=KNOWN_DRUG_KNOWN_PROTEIN,
         help='Problem Setting (1-4)'
     )
 
@@ -41,10 +41,10 @@ def get_args():
     )
 
     parser.add_argument(
-        '--max_target_len',
+        '--max_protein_len',
         type=int,
         default=1000,
-        help='Max Length of FASTA sequence of target/protein'
+        help='Max Length of FASTA sequence of protein/protein'
     )
 
     parser.add_argument(
@@ -55,17 +55,17 @@ def get_args():
     )
 
     parser.add_argument(
-        '--target_embedding_dim',
+        '--protein_embedding_dim',
         type=int,
         default=128,
         help='Embedding dimension for a Target (FASTA) character'
     )
     
     parser.add_argument(
-        '--model_type',
+        '--model',
         type=str,
-        default='CNN',
-        help='CNN or LSTM models'
+        default='Transformer',
+        help='CNN/Transformer/TransDTBA models'
     )
     
     parser.add_argument(
@@ -76,10 +76,10 @@ def get_args():
     )
     
     parser.add_argument(
-        '--target_output_size',
+        '--protein_output_size',
         type=int,
         default=128,
-        help='Output size of LSTM network for target (FASTA) sequence'
+        help='Output size of LSTM network for protein (FASTA) sequence'
     )
     
     parser.add_argument(
@@ -98,11 +98,11 @@ def get_args():
     )
 
     parser.add_argument(
-        '--target_kernel_size',
+        '--protein_kernel_size',
         type=int,
         default=[4],
         nargs='+',
-        help='Kernel size for target (FASTA sequence)'
+        help='Kernel size for protein (FASTA sequence)'
     )
 
     parser.add_argument(
@@ -111,6 +111,34 @@ def get_args():
         default=[32],
         nargs='+',
         help='Number of filters/out_chanel for initial convolution layer'
+    )
+
+    parser.add_argument(
+        '--num_trans_layers',
+        type=int,
+        default=2,
+        help='Number of transformer layers'
+    )
+
+    parser.add_argument(
+        '--num_attn_heads',
+        type=int,
+        default=8,
+        help='Number of transformer attention heads'
+    )
+
+    parser.add_argument(
+        '--trans_forward_expansion',
+        type=int,
+        default=4,
+        help='Factor to expand transformers hidden representation'
+    )
+
+    parser.add_argument(
+        '--trans_dropout_rate',
+        type=float,
+        default=0.1,
+        help='Dropout rate for transformers'
     )
 
     parser.add_argument(
@@ -123,14 +151,14 @@ def get_args():
     parser.add_argument(
         '--batch_size',
         type=int,
-        default=32,
+        default=64,
         help='Batch size. Must divide evenly into the dataset sizes.'
     )
 
     parser.add_argument(
         '--num_epoch',
         type=int,
-        default=10,
+        default=100,
         help='Number of epochs to train.'
     )
 
@@ -155,5 +183,5 @@ def get_args():
         help='use log transformation for Y'
     )
 
-    args = parser.parse_args()  # '--target_kernel_size 4 8'.split()
+    args = parser.parse_args()  # '--protein_kernel_size 4 8'.split()
     return args

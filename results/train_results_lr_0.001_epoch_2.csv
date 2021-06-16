@@ -1,0 +1,3 @@
+,run,epoch,loss,epoch_duration,run duration,num_filters,drug_kernel_size,protein_kernel_size,learning_rate,num_epoch
+0,1,1,127.02379608154297,17.82524538040161,17.825257062911987,32,4,4,0.001,2
+1,1,2,31.8680819272995,18.24094581604004,36.06631112098694,32,4,4,0.001,2

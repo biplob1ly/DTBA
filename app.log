@@ -1,35 +1,36 @@
-2020-11-17 20:01:04,516 Namespace(batch_size=32, binary_th=0.0, data_config_id=1, dataset_path='./data/kiba/', drug_embedding_dim=128, drug_kernel_size=[4], is_log=0, learning_rate=0.001, log='INFO', max_drug_len=100, max_target_len=1000, num_epoch=10, num_filters=[32], random_seed=123, target_embedding_dim=128, target_kernel_size=[4])
-2020-11-17 20:01:04,517 Loading Data Set...
-2020-11-17 20:01:04,710 CV set 1
-Train set size: 78836
-Dev set size: 19709
-Test set size: 19709
+2021-02-23 23:04:15,254 Namespace(batch_size=16, binary_th=0.0, data_config_id=1, dataset_path='./data/kiba/', drug_embedding_dim=128, drug_kernel_size=[4], drug_output_size=128, hidden_size=128, is_log=0, learning_rate=0.001, log='INFO', max_drug_len=100, max_target_len=1000, model='Transformer', num_attn_heads=8, num_epoch=2, num_filters=[32], num_trans_layers=3, random_seed=123, target_embedding_dim=128, target_kernel_size=[4], target_output_size=128, trans_dropout_rate=0.1, trans_forward_expansion=4)
+2021-02-23 23:04:15,254 Loading Data Set...
+2021-02-23 23:04:15,445 CV set 1
+Train set size: 78832
+Dev set size: 19696
+Test set size: 19696
 
 
-2020-11-17 20:01:04,796 CV set 2
-Train set size: 78836
-Dev set size: 19709
-Test set size: 19709
+2021-02-23 23:04:15,527 CV set 2
+Train set size: 78832
+Dev set size: 19696
+Test set size: 19696
 
 
-2020-11-17 20:01:04,882 CV set 3
-Train set size: 78836
-Dev set size: 19709
-Test set size: 19709
+2021-02-23 23:04:15,608 CV set 3
+Train set size: 78832
+Dev set size: 19696
+Test set size: 19696
 
 
-2020-11-17 20:01:04,968 CV set 4
-Train set size: 78836
-Dev set size: 19709
-Test set size: 19709
+2021-02-23 23:04:15,688 CV set 4
+Train set size: 78832
+Dev set size: 19696
+Test set size: 19696
 
 
-2020-11-17 20:01:05,053 CV set 5
-Train set size: 78836
-Dev set size: 19709
-Test set size: 19709
+2021-02-23 23:04:15,768 CV set 5
+Train set size: 78832
+Dev set size: 19696
+Test set size: 19696
 
 
-2020-11-17 20:01:06,605 Training with: HyperParams(num_filters=32, drug_kernel_size=4, target_kernel_size=4, learning_rate=0.001, num_epoch=10)
-2020-11-17 20:02:47,846 Training finished
-2020-11-17 20:02:55,692 Dev MSE: 0.5968552827835083 and Dev CI: 0.6153157353401184
+2021-02-23 23:04:17,377 Training with: HyperParams(num_filters=32, drug_kernel_size=4, target_kernel_size=4, learning_rate=0.001, num_epoch=2)
+2021-02-23 23:04:17,378 Training Started...
+2021-02-23 23:05:12,892 Training finished.
+2021-02-23 23:05:21,202 Dev MSE: 79.42019653320312 and Dev CI: 0.4693877696990967

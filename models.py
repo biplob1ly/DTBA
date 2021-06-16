@@ -3,186 +3,211 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
-import numpy as np
+from constants import PADDING_INDEX
+
 
 class CNNModel(nn.Module):
-    def __init__(self, drug_charset_size, drug_embedding_dim, drug_kernel_size,
-                 target_charset_size, target_embedding_dim, target_kernel_size,
+    def __init__(self, drug_charset_size, drug_embed_size, drug_kernel_size,
+                 protein_charset_size, protein_embed_size, protein_kernel_size,
                  num_filters):
         super(CNNModel, self).__init__()
-        self.drug_embed = nn.Embedding(drug_charset_size, drug_embedding_dim)
-        self.drug_cnn = nn.Conv1d(in_channels=drug_embedding_dim, out_channels=num_filters,
+        self.drug_embedder = nn.Embedding(drug_charset_size+1, drug_embed_size, padding_idx=PADDING_INDEX)     # +1 for padding
+        self.drug_cnn1 = nn.Conv1d(in_channels=drug_embed_size, out_channels=num_filters,
+                                  kernel_size=drug_kernel_size, stride=1, padding=0)
+        self.drug_cnn2 = nn.Conv1d(in_channels=num_filters, out_channels=num_filters*2,
+                                  kernel_size=drug_kernel_size, stride=1, padding=0)
+        self.drug_cnn3 = nn.Conv1d(in_channels=num_filters*2, out_channels=num_filters*3,
                                   kernel_size=drug_kernel_size, stride=1, padding=0)
 
-        self.target_embed = nn.Embedding(target_charset_size, target_embedding_dim)
-        self.target_cnn = nn.Conv1d(in_channels=target_embedding_dim, out_channels=num_filters,
-                                    kernel_size=target_kernel_size, stride=1, padding=0)
+        self.protein_embedder = nn.Embedding(protein_charset_size+1, protein_embed_size, padding_idx=PADDING_INDEX)     # +1 for padding
+        self.protein_cnn1 = nn.Conv1d(in_channels=protein_embed_size, out_channels=num_filters,
+                                    kernel_size=protein_kernel_size, stride=1, padding=0)
+        self.protein_cnn2 = nn.Conv1d(in_channels=num_filters, out_channels=num_filters*2,
+                                    kernel_size=protein_kernel_size, stride=1, padding=0)
+        self.protein_cnn3 = nn.Conv1d(in_channels=num_filters*2, out_channels=num_filters*3,
+                                    kernel_size=protein_kernel_size, stride=1, padding=0)
 
-        self.fc1 = nn.Linear(num_filters*2, 1024)
+        self.fc1 = nn.Linear(num_filters*6, 1024)
         self.dropout1 = nn.Dropout(p=0.1)
-        self.fc2 = nn.Linear(1024, 512)
-        self.output = nn.Linear(512, 1)
+        self.fc2 = nn.Linear(1024, 1024)
         self.dropout2 = nn.Dropout(p=0.1)
+        self.fc3 = nn.Linear(1024, 512)
+        self.output = nn.Linear(512, 1)
 
     def forward(self, XD, XT):
-        XD = self.drug_embed(XD)
-        XD = self.drug_cnn(XD.permute(0, 2, 1))
-        XD = F.adaptive_max_pool1d(F.relu(XD), 1)
+        XD = self.drug_embedder(XD)     # B x DS -> B x DS x E
+        XD = self.drug_cnn1(XD.permute(0, 2, 1))     # B x E x DS -> B x DF x (DS - K + 1)
+        XD = self.drug_cnn2(XD)     # B x DF x (DS - K + 1) -> B x 2*DF x (DS - 2*K + 2)
+        XD = self.drug_cnn3(XD)     # B x 2*DF x (DS - 2*K + 2) -> B x 3*DF x (DS - 3*K + 3)
+        XD = F.adaptive_max_pool1d(F.relu(XD), 1)       # B x 3*DF x (DS - 3*K + 3) - > B x 3*DF x 1
 
-        XT = self.target_embed(XT)
-        XT = self.target_cnn(XT.permute(0, 2, 1))
-        XT = F.adaptive_max_pool1d(F.relu(XT), 1)
-        DTI = torch.cat((XD.squeeze(), XT.squeeze()), 1)
+        XT = self.protein_embedder(XT)     # B x DS -> B x TS x E
+        XT = self.protein_cnn1(XT.permute(0, 2, 1))     # B x E x TS -> B x TF x (TS - K + 1)
+        XT = self.protein_cnn2(XT)       # B x TF x (TS - K + 1) -> B x 2*TF x (TS - 2*K + 2)
+        XT = self.protein_cnn3(XT)       # B x 2*TF x (TS - 2*K + 2) -> B x 3*TF x (TS - 3*K + 3)
+        XT = F.adaptive_max_pool1d(F.relu(XT), 1)       # B x 3*TF x (TS - 3*K + 1) - > B x 3*TF x 1
 
-        DTI = F.relu(self.fc1(DTI))
+        DTI = torch.cat((XD.squeeze(), XT.squeeze()), 1)    # (B x 3*DF x 1) + (B x 3*TF x 1) -> B x 6*F
+
+        DTI = F.relu(self.fc1(DTI))     # B x 6*F -> B x 1024
         DTI = self.dropout1(DTI)
-        DTI = F.relu(self.fc2(DTI))
+        DTI = F.relu(self.fc2(DTI))     # B x 1024 -> B x 1024
         DTI = self.dropout2(DTI)
-        out = self.output(DTI)
+        DTI = F.relu(self.fc3(DTI))     # B x 1024 -> B x 512
+        out = self.output(DTI)          # B x 512 -> B x 1
         return out
 
 
-class LSTM(nn.Module):
-    def __init__(self, vocab_size, embedding_size, hidden_size, out_size,
-                 bidirect, dropout=.1, num_layers=1):
-        """
-        Even if we don't use it, it means we could potentially try 2 different models for 
-        protein encoding. Also, it has fewer parameters than the transformer - meaning it 
-        might work better for the smaller protein dataset.
-        
-        Model is LSTM followed by three linear/dropout layers
-        """
-        super(LSTM, self).__init__()
-        self.bidirect = bidirect
-        self.hidden_size = hidden_size
-        self.embedder = nn.Embedding(vocab_size, embedding_size)
-        self.lstm = nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, 
-                            batch_first=True, dropout=dropout, bidirectional=bidirect)
-        self.linear_1 = nn.Linear(2*hidden_size, 512)
-        self.dropout_1 = nn.Dropout(dropout)
-        self.linear_2 = nn.Linear(512, 256)
-        self.dropout_2 = nn.Dropout(dropout)
-        self.linear_3 = nn.Linear(256, out_size)
-    
-    def forward(self, data):
-        """
-        data is [num_examples x max_example_length]
-        returns vector of shape [num_examples x max_example_length x embedding_size]
-        """
-        # Hacky way to get the first zero in each example
-        mask = [torch.where(i == 0)[0] for i in data]
-        lengths = [x[0].item() if len(x) > 0 else data.shape[-1] for x in mask]
-        
-        embedding = self.embedder(data)
-        packed_embedding = nn.utils.rnn.pack_padded_sequence(embedding, lengths, enforce_sorted=False, batch_first=True)
-        out, hn = self.lstm(packed_embedding)
-        out, out_lengths = nn.utils.rnn.pad_packed_sequence(out)
-        
-        output = F.relu(self.linear_1(out.data))
-        output = F.relu(self.linear_2(self.dropout_1(output)))
-        output = F.relu(self.linear_3(self.dropout_2(output)))
-        
-        return output.permute(1,0,2)
-
-
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=.1, max_len=5000):
-        """
-        Taken from pytorch tutorial on Transformers
-        https://pytorch.org/tutorials/beginner/transformer_tutorial.html
-        Which in turn seems to be taken from Zelun Wang
-        https://github.com/wzlxjtu/PositionalEncoding2D/blob/master/positionalembedding2d.py
-        
-        d_model: size of input vectors
-        max_len: length of positions
-        
-        returns max_length * d_model position matrix
-        """
+    def __init__(self, d_model, dropout_rate, max_len):
         super(PositionalEncoding, self).__init__()
-        self.dropout = nn.Dropout(dropout)
-        
-        encoding = torch.zeros(max_len, d_model)
-        position = torch.arage(0, max_len, dtype=torch.float).unsqueeze(1)
+        self.dropout = nn.Dropout(dropout_rate)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        encoding[:, 0::2] = torch.sin(position * div_term)
-        encoding[:, 1::2] = torch.cos(position * div_term)
-        encoding = encoding.unsqueeze(0).transpose(0,1)
-        self.register_buffer('encoding', encoding)
-    
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+
     def forward(self, x):
-        x = x + self.encoding[:x.size(0), :]
-        return self.dropout(x)        
+        x = x + self.pe[:, :x.size(1)].to(x.device)
+        return self.dropout(x)
 
 
 class Transformer(nn.Module):
-    def __init__(self, num_embeddings, input_size, n_head, hidden_size, n_layers, dropout=.1):
-        """
-        Taken from pytorch tutorial on Transformers
-        https://pytorch.org/tutorials/beginner/transformer_tutorial.html
-        
-        num_embeddings: Size of input dictionary
-        input_size: embe
-        n_head: number of heads in multihead attention
-        hidden_size: size of embeddings/hidden layers
-        n_layers: number of encoding layers in transformer
-        """
+    def __init__(self, drug_charset_size, drug_embed_size, max_drug_length,
+                 protein_charset_size, protein_embed_size, max_protein_length,
+                 num_layers, num_heads, forward_expansion, dropout_rate,
+                 batch_size):
         super(Transformer, self).__init__()
-        self.encoder = nn.Embedding(num_embeddings, input_size)
-        self.pos_encoder = PositionalEncoding(input_size, dropout)
-        encoder_layers = TransformerEncoderLayer(input_size, n_head, hidden_size, dropout)
-        self.transformer_encoder = TransformerEncoder(encoder_layers, n_layers)
-        self.input_size = input_size
-        self.decoder = nn.Linear(input_size, num_embeddings)
-        
-        self.init_weights()
+        self.drug_embed_size = drug_embed_size
+        self.protein_embed_size = protein_embed_size
+        self.batch_size = batch_size
+        self.drug_embedder = nn.Embedding(drug_charset_size+1, drug_embed_size, padding_idx=PADDING_INDEX)
+        self.protein_embedder = nn.Embedding(protein_charset_size+1, protein_embed_size, padding_idx=PADDING_INDEX)
+        self.drug_pos_encoder = PositionalEncoding(drug_embed_size, dropout_rate, max_drug_length)
+        self.protein_pos_encoder = PositionalEncoding(protein_embed_size, dropout_rate, max_protein_length)
+        drug_encoder_layer = TransformerEncoderLayer(d_model=drug_embed_size, nhead=num_heads,
+                                                      dim_feedforward=forward_expansion * drug_embed_size,
+                                                      dropout=dropout_rate)
+        protein_encoder_layer = TransformerEncoderLayer(d_model=protein_embed_size, nhead=num_heads,
+                                                        dim_feedforward=forward_expansion * protein_embed_size,
+                                                        dropout=dropout_rate)
+        self.drug_encoder = TransformerEncoder(drug_encoder_layer, num_layers)
+        self.protein_encoder = TransformerEncoder(protein_encoder_layer, num_layers)
 
-    def generate_square_subsequent_mask(self, size):
-        """
-        I'm actually not sure what purpose this function has
-        But I copied it down anyway - maybe it solves a problem I don't understand yet.
-        """
-        mask = (torch.triu(torch.ones(size, size)) == 1).transpose(0,1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-        return mask
-        
-    def init_weights(self):
-        init_range = 0.1
-        self.encoder.weight.data.uniform_(-init_range, init_range)
-        self.decoder.bias.data.zero_()
-        self.decoder.weight.data.uniform_(-init_range, init_range)
-        
-    def forward(self, x, x_mask):
-        x = self.encoder(x) * math.sqrt(self.input_size)
-        x = self.pos_encoder(x)
-        output = self.transformer_encoder(x, x_mask)
-        output = self.decoder(x)
-        return output
+        self.fc1 = nn.Linear(drug_embed_size + protein_embed_size, 1024)
+        self.dropout1 = nn.Dropout(p=0.1)
+        self.fc2 = nn.Linear(1024, 1024)
+        self.dropout2 = nn.Dropout(p=0.1)
+        self.fc3 = nn.Linear(1024, 512)
+        self.output = nn.Linear(512, 1)
+
+    def forward(self, drugs, proteins):
+        d_padding_masks = (drugs == PADDING_INDEX).to(drugs.device)   # B x DS
+        p_padding_masks = (proteins == PADDING_INDEX).to(proteins.device)   # B x TS
+
+        d_embeds = self.drug_pos_encoder(self.drug_embedder(drugs) * math.sqrt(self.drug_embed_size))   # B x DS -> B x DS x E
+        d_embeds = d_embeds.permute(1, 0, 2)    # DS x B x E
+        p_embeds = self.protein_pos_encoder(self.protein_embedder(proteins) * math.sqrt(self.protein_embed_size))   # B x TS -> B x TS x E
+        p_embeds = p_embeds.permute(1, 0, 2)    # TS x B x E
+
+        encoded_drugs = self.drug_encoder(d_embeds, src_key_padding_mask=d_padding_masks)    # DS x B x E
+        encoded_drugs = encoded_drugs.permute(1, 0, 2)   # B x DS x E
+        pooled_drugs = encoded_drugs.mean(dim=1)
+        encoded_proteins = self.protein_encoder(p_embeds, src_key_padding_mask=p_padding_masks)   # TS x B x E
+        encoded_proteins = encoded_proteins.permute(1, 0, 2)   # B x TS x E
+        pooled_proteins = encoded_proteins.mean(dim=1)
+
+        DTI = torch.cat((pooled_drugs, pooled_proteins), 1)    # (B x E) + (B x E) -> B x 2*E
+
+        DTI = F.relu(self.fc1(DTI))     # B x 2*E -> B x 1024
+        DTI = self.dropout1(DTI)
+        DTI = F.relu(self.fc2(DTI))     # B x 1024 -> B x 1024
+        DTI = self.dropout2(DTI)
+        DTI = F.relu(self.fc3(DTI))     # B x 1024 -> B x 512
+        out = self.output(DTI)          # B x 512 -> B x 1
+        return out
 
 
-class InteractionNetwork(nn.Module):
-    def __init__(self, drug_model, target_model, drug_size, target_size):
-        super(InteractionNetwork, self).__init__()
-        self.target_model = target_model
-        self.drug_model = drug_model
-        self.embedding_size = drug_size + target_size
+class Attention(nn.Module):
+    def __init__(self, hidden_size, attn_dims, attn_expansion=2, dropout_rate=0.1):
+        super(Attention, self).__init__()
+        self.l1 = nn.Linear(hidden_size, hidden_size*attn_expansion)
+        self.tnh = nn.Tanh()
+        # self.dropout = nn.Dropout(dropout_rate)
+        self.l2 = nn.Linear(hidden_size*attn_expansion, attn_dims)
+
+    def forward(self, hidden, attn_mask=None):
+        # output_1: B x S x H -> B x S x attn_expansion*H
+        output_1 = self.tnh(self.l1(hidden))
+        # output_1 = self.dropout(output_1)
+
+        # output_2: B x S x attn_expansion*H -> B x S x attn_dims(O)
+        output_2 = self.l2(output_1)
+
+        # Masked fill to avoid softmaxing over padded words
+        if attn_mask is not None:
+            output_2 = output_2.masked_fill(attn_mask == 0, -1e9)
+
+        # attn_weights: B x S x attn_dims(O) -> B x O x S
+        attn_weights = F.softmax(output_2, dim=1).transpose(1, 2)
+
+        # weighted_output: (B x O x S) @ (B x S x H) -> B x O x H
+        weighted_output = attn_weights @ hidden
+        weighted_output = weighted_output.sum(dim=1)   # B x O x H -> B x H
+        return weighted_output, attn_weights
         
-        self.dense_1 = nn.Linear(self.embedding_size, 1024)
-        self.dropout_1 = nn.Dropout(0.1)
-        self.dense_2 = nn.Linear(1024, 1024)
-        self.dropout_2 = nn.Dropout(0.1)
-        self.dense_3 = nn.Linear(1024, 512)
+
+class TransDTBA(nn.Module):
+    def __init__(self, drug_charset_size, drug_embed_size, max_drug_length,
+                 protein_charset_size, protein_embed_size, max_protein_length,
+                 num_layers, num_heads, forward_expansion, dropout_rate,
+                 batch_size, attn_dims=64):
+        super(TransDTBA, self).__init__()
+        self.drug_embed_size = drug_embed_size
+        self.protein_embed_size = protein_embed_size
+        self.batch_size = batch_size
+        self.drug_embedder = nn.Embedding(drug_charset_size+1, drug_embed_size, padding_idx=PADDING_INDEX)
+        self.protein_embedder = nn.Embedding(protein_charset_size+1, protein_embed_size, padding_idx=PADDING_INDEX)
+        self.drug_pos_encoder = PositionalEncoding(drug_embed_size, dropout_rate, max_drug_length)
+        self.protein_pos_encoder = PositionalEncoding(protein_embed_size, dropout_rate, max_protein_length)
+        drug_encoder_layer = TransformerEncoderLayer(d_model=drug_embed_size, nhead=num_heads,
+                                                 dim_feedforward=forward_expansion*drug_embed_size, dropout=dropout_rate)
+        protein_encoder_layer = TransformerEncoderLayer(d_model=protein_embed_size, nhead=num_heads,
+                                                 dim_feedforward=forward_expansion*protein_embed_size, dropout=dropout_rate)
+        self.drug_encoder = TransformerEncoder(drug_encoder_layer, num_layers)
+        self.protein_encoder = TransformerEncoder(protein_encoder_layer, num_layers)
+
+        self.drug_attn_layer = Attention(drug_embed_size, attn_dims)
+        self.protein_attn_layer = Attention(protein_embed_size, attn_dims)
+
+        self.output = nn.Linear(drug_embed_size + protein_embed_size, 1)
+
+    def forward(self, drugs, proteins):
+        # attn_mask: B x S -> B x S x 1
+        d_attn_mask = (drugs != PADDING_INDEX).unsqueeze(2).to(drugs.device)
+        p_attn_mask = (proteins != PADDING_INDEX).unsqueeze(2).to(proteins.device)
         
-        self.prediction = nn.Linear(512, 1)
-        
-    def forward(self, drug, target):
-        drug = self.drug_model(drug)
-        target = self.target_model(target)
-        embedding = torch.cat((drug, target), dim=1)
-        
-        output = F.relu(self.dense_1(embedding))
-        output = self.dropout_1(output)
-        output = F.relu(self.dense_2(output))
-        output = self.dropout_2(output)
-        output = F.relu(self.dense_3(output))
-        output = self.prediction(output)    # Kernel_initializer = 'normal'
-        
+        d_padding_masks = (drugs == PADDING_INDEX).to(drugs.device)   # B x DS
+        p_padding_masks = (proteins == PADDING_INDEX).to(proteins.device)   # B x TS
+
+        d_embeds = self.drug_pos_encoder(self.drug_embedder(drugs) * math.sqrt(self.drug_embed_size))   # B x DS x E
+        d_embeds = d_embeds.permute(1, 0, 2)    # DS x B x E
+        p_embeds = self.protein_pos_encoder(self.protein_embedder(proteins) * math.sqrt(self.protein_embed_size))   # B x TS x E
+        p_embeds = p_embeds.permute(1, 0, 2)    # TS x B x E
+
+        encoded_drugs = self.drug_encoder(d_embeds, src_key_padding_mask=d_padding_masks)    # DS x B x E
+        encoded_drugs = encoded_drugs.permute(1, 0, 2)   # B x DS x E
+        encoded_proteins = self.protein_encoder(p_embeds, src_key_padding_mask=p_padding_masks)   # TS x B x E
+        encoded_proteins = encoded_proteins.permute(1, 0, 2)   # B x TS x E
+
+        # both encoded_drugs and encoded_proteins are of shape: batch_size, seq_len, embed_size
+        attended_drugs, drug_attn_weights = self.drug_attn_layer(encoded_drugs, d_attn_mask)
+        attended_proteins, protein_attn_weights = self.protein_attn_layer(encoded_proteins, p_attn_mask)
+
+        DTI = torch.cat((attended_drugs, attended_proteins), 1)
+        out = self.output(DTI)
+        return out
